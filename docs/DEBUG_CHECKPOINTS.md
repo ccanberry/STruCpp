@@ -78,6 +78,57 @@ result.checkpoints; // CheckpointMapEntry[]
 result.cppFiles;    // includes an extra debug_hook.cpp
 ```
 
+## Editor integration (openplc-editor-4.2.8)
+
+The editor's run-control UI (breakpoint gutter + pause/continue/step toolbar)
+consumes `checkpoint-map.json` end to end:
+
+```
+build/<target>/src/checkpoint-map.json
+  → DebuggerPort.readCheckpointMap (IPC util:read-checkpoint-map)
+  → utils/checkpoint-map.ts parseCheckpointMap()  → DebugCheckpointEntry[]
+  → workspace.debugCheckpointMap (store)
+  → gutter lights breakpointable lines; useRunControlSync arms ids (FC 0x46)
+```
+
+### Schema the editor expects
+
+The editor works in **POU-local, body-relative** coordinates (Monaco shows one
+POU *body*, not the wrapped source file). `parseCheckpointMap` accepts two shapes:
+
+1. **Editor-native (preferred)** — resolve each checkpoint to the POU and the
+   line *within the POU body* before serialising:
+   ```json
+   [ { "id": 0, "pou": "main", "line": 10 }, { "id": 1, "pou": "main", "line": 11 } ]
+   ```
+   (`{ "checkpoints": [...] }` wrapper also accepted.)
+
+2. **Raw compiler form (fallback)** — `{ "id", "file", "startLine", ... }` as
+   `CompileResult.checkpoints` carries it today. The editor takes `file` (minus
+   `.st`/`.il`) as the POU name and `startLine` as the line. **Caveat:** a per-POU
+   source file carries the `PROGRAM …/VAR … END_VAR` header ahead of the body, so
+   `startLine` is offset from the body line the gutter needs by the header height.
+   Fine for a first bring-up, wrong by a few lines for a real project.
+
+### Producer requirements (still open — infra, not code-in-this-repo)
+
+For the editor gutter to land on the exact line, the **debug-build tooling** must:
+
+1. **Serialise** `result.checkpoints` to `build/<target>/src/checkpoint-map.json`
+   (the ARM9 debug build — `scratchpad/gen-instrumented.mjs` pattern — produces
+   `.checkpoints` but does not yet write the file).
+2. **Emit POU-local body-relative** `{id,pou,line}` (shape 1), i.e. subtract the
+   per-POU header offset the editor's splitter already knows
+   (`program-build-pipeline.ts` `split.pouOffsets`).
+3. For **editor-driven** debug builds, the fork must be wired into the editor
+   toolchain (`scripts/download-binaries.ts` / `setup:strucpp` repointed to this
+   fork; editor currently bundles upstream `strucpp` 0.5.13 with no
+   `debugCheckpoints`). This is the M1 long-pole in
+   `openplc-runtime/docs/DEBUGGER_DESIGN.md`.
+
+Until (1)–(3) land, the editor consumption path is inert (no `checkpoint-map.json`
+→ run control stays hidden), exactly as on a normal deploy.
+
 ## Future: instance-scoped breakpoints
 
 To halt only one FB instance (CoDeSys "instance breakpoint"), the hook signature
