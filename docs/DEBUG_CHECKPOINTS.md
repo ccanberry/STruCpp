@@ -110,24 +110,38 @@ POU *body*, not the wrapped source file). `parseCheckpointMap` accepts two shape
    `startLine` is offset from the body line the gutter needs by the header height.
    Fine for a first bring-up, wrong by a few lines for a real project.
 
-### Producer requirements (still open — infra, not code-in-this-repo)
+### Producer status (editor-driven debug build — DONE)
 
-For the editor gutter to land on the exact line, the **debug-build tooling** must:
+The editor now produces `checkpoint-map.json` itself:
 
-1. **Serialise** `result.checkpoints` to `build/<target>/src/checkpoint-map.json`
-   (the ARM9 debug build — `scratchpad/gen-instrumented.mjs` pattern — produces
-   `.checkpoints` but does not yet write the file).
-2. **Emit POU-local body-relative** `{id,pou,line}` (shape 1), i.e. subtract the
-   per-POU header offset the editor's splitter already knows
-   (`program-build-pipeline.ts` `split.pouOffsets`).
-3. For **editor-driven** debug builds, the fork must be wired into the editor
-   toolchain (`scripts/download-binaries.ts` / `setup:strucpp` repointed to this
-   fork; editor currently bundles upstream `strucpp` 0.5.13 with no
-   `debugCheckpoints`). This is the M1 long-pole in
-   `openplc-runtime/docs/DEBUGGER_DESIGN.md`.
+1. **Fork wired into the editor toolchain** — the fork is packed
+   (`npm pack`) and vendored into `openplc-editor-4.2.8/vendor/`, and
+   `scripts/download-binaries.ts` gained a `localTarball` mode so
+   `setup:strucpp` installs it instead of the upstream 0.5.13 release
+   (`binary-versions.json` pins v0.6.0). Rebuild + repack + revendor when this
+   fork changes.
+2. **Instrumented on the debug path only** — `compileForDebugger` passes
+   `debugCheckpoints: true` through `handleCompileSTtoCpp` →
+   `runProgramBuildPipeline`; the normal `compileProgram` deploy stays
+   uninstrumented.
+3. **Serialised POU-local** — `runProgramBuildPipeline` resolves the raw
+   per-POU-file `{id,file,startLine}` to body-local `{id,pou,line}`
+   (`utils/PLC/resolve-checkpoints.ts` — subtract the first body line, = first
+   non-blank line after the last `END_VAR`) and writes
+   `build/<target>/src/checkpoint-map.json` next to `debug-map.json`. Verified
+   end-to-end against the installed fork on a multi-POU sample.
 
-Until (1)–(3) land, the editor consumption path is inert (no `checkpoint-map.json`
-→ run control stays hidden), exactly as on a normal deploy.
+### Still open (cross-repo, bench-specific)
+
+The editor writes the instrumented C++ + `checkpoint-map.json` under the
+project's `build/<target>/src`. For the **ARM9 board**, the shared object that
+actually runs on the target is built by the runtime script pipeline
+(`openplc-runtime/scripts` — `compile.sh` reads `core/generated/`) and deployed
+separately. To drive breakpoints on the bench, that `.so` must be built from the
+**same instrumented sources** this debug build produced (so the ids line up).
+Aligning the editor's debug-build output dir with the ARM9 `core/generated`
+build input is the remaining integration step (tracked in
+`openplc-runtime/docs/DEBUGGER_DESIGN.md`).
 
 ## Future: instance-scoped breakpoints
 
