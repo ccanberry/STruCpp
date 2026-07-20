@@ -89,6 +89,14 @@ export interface CompileOptions {
    * Production compiles leave it off and see no output change.
    */
   emitChunkMarkers?: boolean;
+
+  /**
+   * Emit online-debugger statement checkpoints (see CodeGenOptions
+   * `debugCheckpoints`). The editor's dedicated "Debug" deploy variant sets
+   * this; normal deploys leave it off and see byte-identical output. The
+   * result then carries a `checkpoints` map.
+   */
+  debugCheckpoints?: boolean;
 }
 
 /**
@@ -261,6 +269,14 @@ export interface CompileResult {
    * addresses. Serialize to `debug-map.json`. See debug-table-gen.ts.
    */
   debugMap?: import("./backend/debug-table-gen.js").DebugMapV2;
+
+  /**
+   * Online-debugger statement checkpoints (`id -> source position`), emitted
+   * only when `debugCheckpoints` is set. Serialize to `checkpoint-map.json`;
+   * the editor binds source-line breakpoints to checkpoint ids and the runtime
+   * breakpoint table is keyed by id. See codegen.ts `CheckpointMapEntry`.
+   */
+  checkpoints?: import("./backend/codegen.js").CheckpointMapEntry[];
 }
 
 /**

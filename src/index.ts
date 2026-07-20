@@ -752,6 +752,9 @@ export function compile(
     ...(pipeline.mergedOptions.emitChunkMarkers
       ? { emitChunkMarkers: true }
       : {}),
+    ...(pipeline.mergedOptions.debugCheckpoints
+      ? { debugCheckpoints: true }
+      : {}),
   });
   codegen.setProjectModel(pipeline.projectModel!);
 
@@ -825,6 +828,9 @@ export function compile(
       : {}),
     ...(debugTableCpp !== undefined ? { debugTableCpp } : {}),
     ...(debugMap !== undefined ? { debugMap } : {}),
+    ...(codeResult.checkpoints.length > 0
+      ? { checkpoints: codeResult.checkpoints }
+      : {}),
   };
 }
 
