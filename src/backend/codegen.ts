@@ -5895,6 +5895,30 @@ export class CodeGenerator {
   }
 
   /**
+   * EMISSION order of locatedVars[]: program-owned entries in collection
+   * order, then every "@config" entry (located VAR_GLOBAL, including
+   * auto-published globals) as the TAIL. The v4 runtime scopes per-task
+   * located copy-in/out via each program's located_range() and copies
+   * everything PAST the last program-owned entry — the config tail — at the
+   * dispatcher frame boundary (image_tables_bind_located_vars). "@config"
+   * entries are COLLECTED first (the configuration header is emitted before
+   * the program members), so in raw collection order they would sit in front
+   * of the program slices — outside every located_range() AND outside the
+   * config tail — and never sync with the image in either direction (found
+   * live on the MCM20.1: published rw words stuck at 0). This view is safe
+   * to take mid-collection: a program's entries are fully collected before
+   * its own consumers run, and later appends never shift earlier indices —
+   * program-owned entries keep their relative order, "@config" entries only
+   * ever move BEHIND all of them.
+   */
+  private orderedLocatedVars(): LocatedVarDescriptor[] {
+    return [
+      ...this.locatedVars.filter((v) => v.programName !== "@config"),
+      ...this.locatedVars.filter((v) => v.programName === "@config"),
+    ];
+  }
+
+  /**
    * Generate the located variables descriptor array in the header.
    */
   private generateLocatedVarsDeclaration(): void {
@@ -5932,7 +5956,7 @@ export class CodeGenerator {
     this.emitHeader("");
 
     // Forward declarations for program instances
-    for (const locVar of this.locatedVars) {
+    for (const locVar of this.orderedLocatedVars()) {
       const scope =
         locVar.programName === "@config"
           ? "configuration"
@@ -5982,9 +6006,10 @@ export class CodeGenerator {
         `    { LocatedArea::Input, LocatedSize::Bit, 0, 0, {0, 0, 0}, nullptr }  // placeholder; locatedVarsCount is 0`,
       );
     } else {
-      for (let i = 0; i < this.locatedVars.length; i++) {
-        const locVar = this.locatedVars[i]!;
-        const comma = i < this.locatedVars.length - 1 ? "," : "";
+      const ordered = this.orderedLocatedVars();
+      for (let i = 0; i < ordered.length; i++) {
+        const locVar = ordered[i]!;
+        const comma = i < ordered.length - 1 ? "," : "";
         this.emit(
           `    { LocatedArea::${locVar.area}, LocatedSize::${locVar.size}, ` +
             `${locVar.byteIndex}, ${locVar.bitIndex}, {0, 0, 0}, nullptr }${comma}  // ${locVar.varName} AT ${locVar.address}`,
@@ -6009,8 +6034,9 @@ export class CodeGenerator {
   } {
     let offset = -1;
     let count = 0;
-    for (let i = 0; i < this.locatedVars.length; i++) {
-      if (this.locatedVars[i]!.programName === programName) {
+    const ordered = this.orderedLocatedVars();
+    for (let i = 0; i < ordered.length; i++) {
+      if (ordered[i]!.programName === programName) {
         if (offset < 0) offset = i;
         count++;
       }
@@ -6030,7 +6056,7 @@ export class CodeGenerator {
     // for configuration VAR_GLOBAL (the member is a GlobalVar<V> wrapper).
     memberAccess: string = "",
   ): void {
-    const progVars = this.locatedVars.filter(
+    const progVars = this.orderedLocatedVars().filter(
       (v) => v.programName === programName,
     );
     if (progVars.length === 0) return;
@@ -6038,7 +6064,7 @@ export class CodeGenerator {
     this.emit(`${indent}// Initialize located variable pointers`);
     for (const locVar of progVars) {
       // Find the index of this variable in the global array
-      const index = this.locatedVars.findIndex(
+      const index = this.orderedLocatedVars().findIndex(
         (v) =>
           v.varName === locVar.varName && v.programName === locVar.programName,
       );
