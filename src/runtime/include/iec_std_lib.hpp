@@ -1269,6 +1269,14 @@ inline IEC_BOOL NOT(IEC_BOOL value) noexcept {
     return IEC_BOOL(!iec_unwrap(value));
 }
 
+// `bool | bool` integer-promotes to int in C++, so a strictly-boolean ST
+// expression like NOT(a OR b) over shared-global reads reaches NOT as a
+// plain int. The ST semantic layer already type-checked it as ANY_BIT;
+// treat the promoted value logically.
+inline bool NOT(int value) noexcept {
+    return !value;
+}
+
 /**
  * AND - Bitwise AND (variadic)
  * Input: ANY_BIT, Output: ANY_BIT (same type)
