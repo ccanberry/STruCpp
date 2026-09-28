@@ -69,6 +69,12 @@ export interface ProjectVarDeclaration {
   typeName: string;
   maxLength?: number | string; // For STRING(n) / WSTRING(n) parameterized length; string for constant names
   initialValue?: string;
+  /** An ARRAY initializer (`:= [0, 1, -1]`), kept as the AST. It has no
+   *  single-literal string form, so `initialValue` is "" for it, and codegen
+   *  lowers this instead (see CodeGenerator.lowerArrayInit). Before this field
+   *  existed the initializer was dropped and the variable silently started
+   *  as all zeros. */
+  initialExpr?: Expression;
   isConstant: boolean;
   isRetain: boolean;
   address?: string;
@@ -449,7 +455,7 @@ export class ProjectModelBuilder {
         for (const decl of block.declarations) {
           for (const varName of decl.names) {
             varDeclarations.push(
-              this.convertVarDeclaration(varName, decl, block),
+              this.convertVarDeclaration(varName, decl, block, true),
             );
           }
         }
@@ -569,7 +575,9 @@ export class ProjectModelBuilder {
       if (block.blockType === "VAR_GLOBAL") {
         for (const decl of block.declarations) {
           for (const varName of decl.names) {
-            globalVars.push(this.convertVarDeclaration(varName, decl, block));
+            globalVars.push(
+              this.convertVarDeclaration(varName, decl, block, true),
+            );
           }
         }
       }
@@ -818,10 +826,32 @@ export class ProjectModelBuilder {
     name: string,
     decl: VarDeclaration,
     block: VarBlock,
+    /** True for VAR_GLOBAL and PROGRAM variables, whose codegen initializes
+     *  them from `initialValue`/`initialExpr` only. FB and function variables
+     *  are initialized from the AST and accept any expression. */
+    modelInitOnly = false,
   ): ProjectVarDeclaration {
     let initialValue: string | undefined;
+    let initialExpr: Expression | undefined;
     if (decl.initialValue) {
       initialValue = this.expressionToString(decl.initialValue);
+      if (decl.initialValue.kind === "ArrayLiteralExpression") {
+        initialExpr = decl.initialValue;
+      } else if (initialValue === "" && modelInitOnly) {
+        // An initializer this model cannot carry would reach codegen as "no
+        // initializer" and the variable would start at zero with no
+        // diagnostic. On a PLC that is a wrong value, not a style issue (an
+        // axis map read as all zeros once sent every pump command to axis 0),
+        // so refuse it here.
+        const span = decl.initialValue.sourceSpan;
+        this.addError(
+          `Initial value of '${name}' is not supported here (${decl.initialValue.kind}); ` +
+            `it would silently start as 0. Use a literal or an array literal [a, b, ...].`,
+          span?.startLine ?? 0,
+          span?.startCol ?? 0,
+          span?.file,
+        );
+      }
     }
 
     // Use conditional spreading for optional properties to comply with exactOptionalPropertyTypes
@@ -831,6 +861,7 @@ export class ProjectModelBuilder {
       isConstant: block.isConstant,
       isRetain: block.isRetain,
       ...(initialValue !== undefined ? { initialValue } : {}),
+      ...(initialExpr !== undefined ? { initialExpr } : {}),
       ...(decl.address !== undefined ? { address: decl.address } : {}),
       ...(decl.type.maxLength !== undefined
         ? { maxLength: decl.type.maxLength }

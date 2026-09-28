@@ -2603,7 +2603,12 @@ export class CodeGenerator {
         ) {
           continue;
         }
-        const initVal = this.getDefaultValue(decl.typeName, decl.initialValue);
+        const initVal = decl.initialExpr
+          ? this.lowerArrayInit(
+              this.mapTypeRefToCpp(this.projectVarToTypeRef(decl)),
+              decl.initialExpr,
+            )
+          : this.getDefaultValue(decl.typeName, decl.initialValue);
         // Skip user-defined types (empty initVal) - they use default constructors
         if (initVal) {
           inits.push(`${decl.name}(${initVal})`);
@@ -2643,7 +2648,12 @@ export class CodeGenerator {
         ) {
           continue;
         }
-        const initVal = this.getDefaultValue(decl.typeName, decl.initialValue);
+        const initVal = decl.initialExpr
+          ? this.lowerArrayInit(
+              this.mapTypeRefToCpp(this.projectVarToTypeRef(decl)),
+              decl.initialExpr,
+            )
+          : this.getDefaultValue(decl.typeName, decl.initialValue);
         // Skip user-defined types (empty initVal) - they use default constructors
         if (initVal) {
           inits.push(`${decl.name}(${initVal})`);
@@ -2758,7 +2768,9 @@ export class CodeGenerator {
             ? { referenceKind: gvar.referenceKind }
             : {}),
         });
-        const initVal = this.getDefaultValue(gvar.typeName, gvar.initialValue);
+        const initVal = gvar.initialExpr
+          ? this.lowerArrayInit(cppType, gvar.initialExpr)
+          : this.getDefaultValue(gvar.typeName, gvar.initialValue);
 
         if (!emittedAny) {
           this.emitHeader(
@@ -3459,14 +3471,21 @@ export class CodeGenerator {
         }
       }
       this.recordLineMapping(caseElement.sourceSpan.startLine, caseLabelLine);
+      // Braced case bodies: generated temporaries (e.g. shared-global
+      // read locals) otherwise make later case labels "jump ... crosses
+      // initialization" errors in C++.
+      this.emit(`${innerIndent}{`);
       this.generateStatements(caseElement.statements, bodyIndent);
       this.emit(`${bodyIndent}break;`);
+      this.emit(`${innerIndent}}`);
     }
 
     if (stmt.elseStatements.length > 0) {
       this.emit(`${innerIndent}default:`);
+      this.emit(`${innerIndent}{`);
       this.generateStatements(stmt.elseStatements, bodyIndent);
       this.emit(`${bodyIndent}break;`);
+      this.emit(`${innerIndent}}`);
     }
 
     this.emitLineDirective(stmt.sourceSpan.endLine);
@@ -5647,6 +5666,27 @@ export class CodeGenerator {
   /**
    * Get the default value for a type.
    */
+  /**
+   * C++ initializer for a VAR_GLOBAL or PROGRAM variable declared with an
+   * ARRAY literal (`:= [0, 1, -1]`, see ProjectVarDeclaration.initialExpr).
+   *
+   * Emitted as `<ArrayType>{static_cast<element_type>(e), ...}`. The cast is
+   * not decoration: IEC_ARRAY_1D/2D take a `std::initializer_list<U>`, and a
+   * literal list that mixes 3 and 0.3 (valid ST for an ARRAY OF REAL) has no
+   * single U, so without it the list does not compile. Multi-dimensional
+   * arrays take the same flat list, in row-major order, as IEC 61131-3 does.
+   */
+  private lowerArrayInit(cppType: string, expr: Expression): string {
+    if (expr.kind !== "ArrayLiteralExpression") {
+      return this.generateExpression(expr);
+    }
+    const elements = expr.elements.map(
+      (e) =>
+        `static_cast<${cppType}::element_type>(${this.generateExpression(e)})`,
+    );
+    return `${cppType}{${elements.join(", ")}}`;
+  }
+
   private getDefaultValue(typeName: string, initialValue?: string): string {
     if (initialValue) {
       // Convert enum dot-notation (TRAFFICSTATE.RED) to C++ scoped access (TRAFFICSTATE::RED)
