@@ -277,6 +277,12 @@ export interface CompileResult {
    * breakpoint table is keyed by id. See codegen.ts `CheckpointMapEntry`.
    */
   checkpoints?: import("./backend/codegen.js").CheckpointMapEntry[];
+
+  /**
+   * `checkpointFingerprint(checkpoints)` -- the value the program itself reports through
+   * `strucpp_debug_map_fingerprint()`. Present whenever `checkpoints` is.
+   */
+  checkpointFingerprint?: number;
 }
 
 /**

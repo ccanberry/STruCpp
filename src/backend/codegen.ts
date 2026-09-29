@@ -292,6 +292,29 @@ export interface CheckpointMapEntry {
   endCol: number;
 }
 
+/**
+ * Fingerprint of a checkpoint layout: 32-bit FNV-1a over `id:file:line:col\n` for every
+ * checkpoint, in id order. The same value is compiled into the program (see
+ * `strucpp_debug_map_fingerprint` in debug_hook.cpp) and returned by compile(), so a
+ * debugger can check that the checkpoint map it holds is the one the RUNNING program was
+ * built with before it arms a breakpoint -- a program MD5 over the ST source cannot tell a
+ * debug build from a release build, or one compiler version's numbering from another's.
+ */
+export function checkpointFingerprint(
+  checkpoints: readonly CheckpointMapEntry[],
+): number {
+  let h = 0x811c9dc5;
+  const sorted = [...checkpoints].sort((a, b) => a.id - b.id);
+  for (const cp of sorted) {
+    const s = `${cp.id}:${cp.file}:${cp.startLine}:${cp.startCol}\n`;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i) & 0xff;
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+  }
+  return h >>> 0;
+}
+
 // =============================================================================
 // Code Generator
 // =============================================================================
@@ -1085,6 +1108,15 @@ export class CodeGenerator {
             "",
             'extern "C" void strucpp_set_debug_hook(::strucpp::debug::dbg_hook_t hook) noexcept {',
             "    ::strucpp::debug::g_dbg_hook = hook;",
+            "}",
+            "",
+            "// Which checkpoint layout this program was built with, so a debugger can refuse to",
+            "// arm breakpoints from a map that does not match (see checkpointFingerprint()).",
+            'extern "C" unsigned int strucpp_debug_checkpoint_count(void) noexcept {',
+            `    return ${this.checkpoints.length}u;`,
+            "}",
+            'extern "C" unsigned int strucpp_debug_map_fingerprint(void) noexcept {',
+            `    return 0x${checkpointFingerprint(this.checkpoints).toString(16).padStart(8, "0")}u;`,
             "}",
           ].join(eol) + eol,
       });

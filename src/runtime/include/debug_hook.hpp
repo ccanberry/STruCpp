@@ -20,7 +20,9 @@
  * single-step) — see openplc-runtime `plc_debug_control`. The hook itself is
  * defined ONCE, in the compiler-emitted `debug_hook.cpp` TU, so there is
  * exactly one external `strucpp_set_debug_hook` symbol for the runtime to
- * resolve via dlsym.
+ * resolve via dlsym. The same TU also defines `strucpp_debug_checkpoint_count()` and
+ * `strucpp_debug_map_fingerprint()`, which the runtime reports so a debugger can verify
+ * that its checkpoint map matches the running program before arming a breakpoint.
  *
  * Not gated by any macro: whether checkpoints exist at all is decided at
  * codegen time, so a non-debug build simply never references this header.

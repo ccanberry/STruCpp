@@ -20,7 +20,7 @@ import { transpileILSource } from "./il/il-transpiler.js";
 import { buildProjectModel } from "./project-model.js";
 import { SymbolTables } from "./semantic/symbol-table.js";
 import { SemanticAnalyzer } from "./semantic/analyzer.js";
-import { CodeGenerator } from "./backend/codegen.js";
+import { CodeGenerator, checkpointFingerprint } from "./backend/codegen.js";
 import {
   generateDebugTable,
   type DebugMapV2,
@@ -829,7 +829,10 @@ export function compile(
     ...(debugTableCpp !== undefined ? { debugTableCpp } : {}),
     ...(debugMap !== undefined ? { debugMap } : {}),
     ...(codeResult.checkpoints.length > 0
-      ? { checkpoints: codeResult.checkpoints }
+      ? {
+          checkpoints: codeResult.checkpoints,
+          checkpointFingerprint: checkpointFingerprint(codeResult.checkpoints),
+        }
       : {}),
   };
 }

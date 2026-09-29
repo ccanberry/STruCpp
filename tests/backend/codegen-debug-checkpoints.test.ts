@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 
 import { compile } from "../../src/index.js";
+import { checkpointFingerprint } from "../../src/backend/codegen.js";
 
 const SRC = `
   PROGRAM Main
@@ -69,6 +70,35 @@ describe("debugCheckpoints codegen option", () => {
     expect(hookTus[0].content).toContain(
       'extern "C" void strucpp_set_debug_hook(',
     );
+  });
+
+  it("stamps the program with its checkpoint count and map fingerprint", () => {
+    const r = compile(SRC, { debugCheckpoints: true });
+    const hook = r.cppFiles.find((f) => f.name === "debug_hook.cpp")!.content;
+    const n = r.checkpoints!.length;
+    const fp = checkpointFingerprint(r.checkpoints!);
+    expect(r.checkpointFingerprint).toBe(fp);
+    expect(hook).toContain('extern "C" unsigned int strucpp_debug_checkpoint_count(void) noexcept {');
+    expect(hook).toContain(`    return ${n}u;`);
+    expect(hook).toContain(`    return 0x${fp.toString(16).padStart(8, "0")}u;`);
+  });
+
+  it("the fingerprint is deterministic and moves when a statement moves", () => {
+    const a = compile(SRC, { debugCheckpoints: true }).checkpointFingerprint;
+    const b = compile(SRC, { debugCheckpoints: true }).checkpointFingerprint;
+    expect(a).toBe(b);
+    const moved = compile(SRC.replace("x := 1;", "\n    x := 1;"), { debugCheckpoints: true });
+    expect(moved.checkpointFingerprint).not.toBe(a);
+    // FNV-1a reference value for a known layout, so the TS and the runtime side
+    // can never drift apart silently.
+    expect(checkpointFingerprint([])).toBe(0x811c9dc5);
+    expect(
+      checkpointFingerprint([{ id: 0, file: "main.st", startLine: 4, startCol: 5, endLine: 4, endCol: 11 }]),
+    ).toBe(checkpointFingerprint([{ id: 0, file: "main.st", startLine: 4, startCol: 5, endLine: 9, endCol: 9 }]));
+  });
+
+  it("a release build carries no fingerprint", () => {
+    expect(compile(SRC).checkpointFingerprint).toBeUndefined();
   });
 
   it("production output is unchanged by the feature being present", () => {

@@ -64,6 +64,14 @@ step-over/into/out, matching CoDeSys. Expressions are not checkpointed.
 | `::strucpp::debug::g_dbg_hook` | emitted `debug_hook.cpp` | the inline checkpoint |
 | `extern "C" strucpp_set_debug_hook(void(*)(uint32_t))` | emitted `debug_hook.cpp` | runtime, via dlsym at program load |
 | `checkpoint-map.json` (`id → file/line/col`) | `compile()` result `.checkpoints` | editor: line → id breakpoint binding |
+| `extern "C" unsigned strucpp_debug_checkpoint_count(void)` | emitted `debug_hook.cpp` | runtime: reports it to a debugger (STOPINFO) |
+| `extern "C" unsigned strucpp_debug_map_fingerprint(void)` | emitted `debug_hook.cpp`; same value as `compile()` result `.checkpointFingerprint` | runtime reports it; the editor attaches without redeploying only when it equals its own map's |
+
+The fingerprint is 32-bit FNV-1a over `id:file:startLine:startCol\n` for every checkpoint in
+id order (`checkpointFingerprint()` in codegen.ts). It exists because the program MD5 is taken
+over the ST source: it cannot tell a debug build from a release build of the same program, nor
+one compiler version's checkpoint numbering from another's -- and arming a breakpoint id from
+the wrong map halts the program on the wrong statement.
 
 `id` is project-global and monotonic from 0 in statement-emission order. `file`
 identifies the POU (each POU compiles from its own source file), so no separate

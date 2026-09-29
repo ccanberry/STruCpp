@@ -50,12 +50,15 @@ default; production output is byte-identical. Design:
 | 8 | `src/types.ts` — `CompileOptions` | Added `debugCheckpoints?: boolean`. | Public option surfaced to `compile()`. |
 | 9 | `src/types.ts` — `CompileResult` | Added `checkpoints?: CheckpointMapEntry[]` (via `import("./backend/codegen.js")`). | — |
 | 10 | `src/index.ts` — `compile()` codegen wiring | Pass `debugCheckpoints: true` into the `CodeGenerator` options when `mergedOptions.debugCheckpoints` (mirrors the `emitChunkMarkers` spread); thread `codeResult.checkpoints` into the returned `CompileResult`. | Mirror whatever pattern upstream uses to forward optional codegen flags. |
-| 11 | `tests/backend/codegen-debug-checkpoints.test.ts` | **New file.** 5 tests: default emits nothing; enabled emits one checkpoint/statement; ids monotonic-from-0 and mapped to source lines; header include + single hook TU; production output byte-identical. | New file — the invariant test is the merge safety net. |
+| 12 | `src/backend/codegen.ts` `checkpointFingerprint()` + `debug_hook.cpp`; `src/types.ts` / `src/index.ts` `checkpointFingerprint` | The emitted hook TU also defines `strucpp_debug_checkpoint_count()` and `strucpp_debug_map_fingerprint()` (32-bit FNV-1a over the checkpoint layout); `compile()` returns the same value as `checkpointFingerprint`. Lets a debugger attach to a running debug build without redeploying, and refuse a mismatched map. | Additive; keep the hash definition byte-for-byte (the editor compares values across compiler builds). |
+| 11 | `tests/backend/codegen-debug-checkpoints.test.ts` | **New file.** 5 tests (8 with the fingerprint cases): default emits nothing; enabled emits one checkpoint/statement; ids monotonic-from-0 and mapped to source lines; header include + single hook TU; production output byte-identical. | New file — the invariant test is the merge safety net. |
 
 ### ABI (consumed by the editor + openplc-runtime — keep stable)
 
 - Generated call: `::strucpp::debug::checkpoint(uint32_t id)` before each statement.
 - Runtime installs: `extern "C" void strucpp_set_debug_hook(void(*)(uint32_t))`.
+- Runtime reads (optional): `extern "C" unsigned strucpp_debug_checkpoint_count(void)` and
+  `strucpp_debug_map_fingerprint(void)`; `compile()` returns `checkpointFingerprint` to match.
 - Compiler emits: `checkpoints: [{ id, file, startLine, startCol, endLine, endCol }]`.
   Serialize to `checkpoint-map.json`. `id` is project-global; `file` identifies
   the POU (each POU compiles from its own source file). Editor binds a
