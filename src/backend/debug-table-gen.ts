@@ -480,7 +480,7 @@ export function generateDebugTable(
   // editor's `buildGlobalDebugPath()` returns `name.toUpperCase()` and
   // OPC-UA `GVL:foo` references resolve against the same key.
   // C++ expression is `${name}.value`: each global is emitted as a file-scope
-  // `inline GlobalVar<V>` singleton (value + per-global mutex), so `.value`
+  // `GlobalVar<V>` singleton (value + per-global mutex; extern in the header, defined in configuration.cpp), so `.value`
   // reaches the underlying IEC storage the debugger reads/writes directly —
   // no configuration-instance prefix (see codegen.ts emitFileScopeGlobals,
   // iec_global.hpp).

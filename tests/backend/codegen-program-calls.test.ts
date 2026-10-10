@@ -46,7 +46,8 @@ describe("PROGRAM calls PROGRAM", () => {
   it("calls through one file-scope instance with .run()", () => {
     const r = compile(CALLEE + caller("  ALARMS(enable := TRUE);") + config());
     expect(r.success).toBe(true);
-    expect(r.headerCode).toContain("inline Program_ALARMS ALARMS{};");
+    expect(r.headerCode).toContain("extern Program_ALARMS ALARMS;");
+    expect(r.cppCode).toContain("Program_ALARMS ALARMS{};");
     expect(r.cppCode).toContain("ALARMS.ENABLE = true;");
     expect(r.cppCode).toContain("ALARMS.run();");
     expect(r.cppCode).not.toMatch(/\bALARMS\(true\)/);
@@ -102,6 +103,6 @@ END_PROGRAM
       config();
     const r = compile(src);
     expect(r.success).toBe(true);
-    expect(r.headerCode).not.toContain("inline Program_ALARMS ALARMS");
+    expect(r.headerCode).not.toContain("Program_ALARMS ALARMS");
   });
 });

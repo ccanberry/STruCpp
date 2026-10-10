@@ -445,6 +445,14 @@ export class CodeGenerator {
    * and every body sees the name as a variable of that program type (enterScope).
    */
   protected calledPrograms: Set<string> = new Set();
+  /**
+   * Definitions of the file-scope singletons (VAR_GLOBAL storage, called PROGRAMs), emitted
+   * ONCE in configuration.cpp; the header only declares them `extern`. They were `inline`
+   * definitions in the header, so every translation unit emitted and optimised the dynamic
+   * initialisation of every one of them: a 1-line POU took 3.1 s at -O1 on the ARM9 cross
+   * compiler with 586 globals, 0.28 s with them extern.
+   */
+  private singletonDefinitions: string[] = [];
 
   /** Map of variable name (upper case) → type name (original case) for current scope */
   protected currentScopeVarTypes: Map<string, string> = new Map();
@@ -989,6 +997,7 @@ export class CodeGenerator {
    * Generate C++ code from a compilation unit.
    */
   generate(ast: CompilationUnit): CodeGenResult {
+    this.singletonDefinitions = [];
     this.outputFiles = new Map();
     this.output = [];
     this.headerOutput = [];
@@ -1473,6 +1482,13 @@ export class CodeGenerator {
           this.emit(line);
         }
       }
+      this.emit("");
+    }
+
+    // The file-scope singletons, defined here once and in declaration order: the globals
+    // before the called PROGRAMs whose constructors take their addresses.
+    if (this.singletonDefinitions.length > 0) {
+      for (const d of this.singletonDefinitions) this.emit(d);
       this.emit("");
     }
 
@@ -2826,8 +2842,9 @@ export class CodeGenerator {
           );
           emittedAny = true;
         }
-        this.emitHeader(
-          `inline GlobalVar<${cppType}> ${gvar.name}{${initVal}};`,
+        this.emitHeader(`extern GlobalVar<${cppType}> ${gvar.name};`);
+        this.singletonDefinitions.push(
+          `GlobalVar<${cppType}> ${gvar.name}{${initVal}};`,
         );
 
         // A located VAR_GLOBAL (`AT %IX/%QX/%MW ...`) enters the located-vars
@@ -5334,13 +5351,14 @@ export class CodeGenerator {
 
   /**
    * One file-scope instance per called PROGRAM, after the program classes, named after the
-   * program (see calledPrograms). Inline, like the VAR_GLOBAL storage above it, and with the
-   * same pointers to its VAR_EXTERNALs the configuration hands a task program.
+   * program (see calledPrograms). Like the VAR_GLOBAL storage above it, and with the
+   * same pointers to its VAR_EXTERNALs the configuration hands a task program. Declared
+   * extern here and defined once in configuration.cpp (see singletonDefinitions).
    */
   private emitCalledProgramInstances(): void {
     if (this.calledPrograms.size === 0) return;
     this.emitHeader(
-      "// Called PROGRAMs: one instance each, the POU itself (CODESYS: a PROGRAM may call a PROGRAM).",
+      "// Called PROGRAMs: one instance each, the POU itself (CODESYS: a PROGRAM may call a PROGRAM); defined in configuration.cpp.",
     );
     for (const upper of this.calledPrograms) {
       const prog = this.projectModel?.programs.get(upper);
@@ -5349,7 +5367,8 @@ export class CodeGenerator {
         prog && prog.varExternal.length > 0
           ? prog.varExternal.map((ext) => `&${ext.name}`).join(", ")
           : "";
-      this.emitHeader(`inline Program_${name} ${name}{${args}};`);
+      this.emitHeader(`extern Program_${name} ${name};`);
+      this.singletonDefinitions.push(`Program_${name} ${name}{${args}};`);
     }
     this.emitHeader("");
   }
