@@ -779,7 +779,31 @@ export function compile(
     codegen.addLibraryChunks(archive, reachable);
   }
 
-  const codeResult = codegen.generate(pipeline.ast);
+  // A program the generator refuses (a called PROGRAM that is also on a task, a shared FB
+  // global invoked in a body, ...) is a compile error to report, not a crash with a stack.
+  let codeResult: ReturnType<typeof codegen.generate>;
+  try {
+    codeResult = codegen.generate(pipeline.ast);
+  } catch (e) {
+    return {
+      success: false,
+      cppFiles: [],
+      cppCode: "",
+      headerCode: "",
+      lineMap: new Map(),
+      headerLineMap: new Map(),
+      errors: [
+        ...pipeline.errors,
+        {
+          message: e instanceof Error ? e.message : String(e),
+          line: 0,
+          column: 0,
+          severity: "error",
+        },
+      ],
+      warnings: pipeline.warnings,
+    };
+  }
 
   // Collect codegen warnings
   for (const warn of codeResult.warnings) {

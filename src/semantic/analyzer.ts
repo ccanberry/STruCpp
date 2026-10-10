@@ -2698,7 +2698,9 @@ export class SemanticAnalyzer {
 
     let noun: string | null = null;
     if (sym.kind === "functionBlock") noun = "function block";
-    else if (sym.kind === "program") noun = "program";
+    // A PROGRAM is its own instance (CODESYS): `ALARMS.count` reads the one ALARMS that
+    // runs when it is called, so member access on a program name is allowed.
+    else if (sym.kind === "program") return;
     // Enum TYPEs intentionally allow `EnumType.Member` qualified
     // access — that's how the language disambiguates a member
     // shared between two enums.  Only flag non-enum type symbols

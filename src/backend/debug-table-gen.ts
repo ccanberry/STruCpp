@@ -29,6 +29,7 @@ import type {
 } from "../frontend/ast.js";
 import type { ProjectModel } from "../project-model.js";
 import type { SymbolTables } from "../semantic/symbol-table.js";
+import { findCalledProgramCallers } from "./codegen-utils.js";
 
 // ---------------------------------------------------------------------------
 // Type tags — MUST match TypeTag enum in runtime/include/debug_dispatch.hpp.
@@ -531,6 +532,27 @@ export function generateDebugTable(
             }
           }
         }
+      }
+    }
+  }
+
+  // CALLED PROGRAMs: one file-scope instance each, named after the program (codegen.ts
+  // emitCalledProgramInstances), published under that bare name -- ALARMS.COUNT -- which is
+  // the path CODESYS shows for a PROGRAM that another PROGRAM calls.
+  for (const upper of findCalledProgramCallers(ast).keys()) {
+    const prog = programByName.get(upper);
+    if (!prog) continue;
+    if (tail().length > 0) arrays.push([]);
+    for (const block of prog.varBlocks) {
+      if (
+        block.blockType !== "VAR" &&
+        block.blockType !== "VAR_INPUT" &&
+        block.blockType !== "VAR_OUTPUT"
+      ) {
+        continue;
+      }
+      for (const decl of block.declarations) {
+        visitVarDecl(upper, prog.name, decl);
       }
     }
   }

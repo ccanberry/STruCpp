@@ -54,7 +54,11 @@ import {
 } from "../project-model.js";
 import { isElementaryType, TypeRegistry } from "../semantic/type-registry.js";
 import { TypeCodeGenerator, IEC_TO_CPP_VAR_TYPE } from "./type-codegen.js";
-import { formatArrayType, iecBaseToCppLiteral } from "./codegen-utils.js";
+import {
+  findCalledProgramCallers,
+  formatArrayType,
+  iecBaseToCppLiteral,
+} from "./codegen-utils.js";
 import {
   getTypeBits,
   getTypeCategory,
@@ -434,6 +438,13 @@ export class CodeGenerator {
 
   /** Set of known program type names (upper case) for program invocation detection */
   protected knownProgramTypes: Set<string> = new Set();
+  /**
+   * PROGRAMs called (or read through `PRG.var`) from another POU body, upper-cased.
+   * CODESYS lets a PROGRAM call a PROGRAM; the POU *is* its instance, so each of these
+   * gets ONE file-scope instance named after the program (emitCalledProgramInstances),
+   * and every body sees the name as a variable of that program type (enterScope).
+   */
+  protected calledPrograms: Set<string> = new Set();
 
   /** Map of variable name (upper case) → type name (original case) for current scope */
   protected currentScopeVarTypes: Map<string, string> = new Map();
@@ -1077,6 +1088,7 @@ export class CodeGenerator {
     for (const prog of ast.programs) {
       this.knownProgramTypes.add(prog.name.toUpperCase());
     }
+    this.calledPrograms = this.findCalledPrograms(ast);
 
     // Topologically sort FBs once (used in both header and implementation)
     this.sortedFBs = this.topologicalSortFBs(ast.functionBlocks);
@@ -1392,6 +1404,8 @@ export class CodeGenerator {
         );
       }
     }
+
+    this.emitCalledProgramInstances();
 
     // Generate function declarations
     for (const func of ast.functions) {
@@ -5259,6 +5273,85 @@ export class CodeGenerator {
         }
       }
     }
+    // A called PROGRAM is reachable from every body by its own name, as a variable of its
+    // own type -- so `ALARMS(x := 1)` and `ALARMS.count` take the FB-instance paths
+    // (parameters, EN/ENO, members). A local variable of the same name wins.
+    for (const prog of this.calledPrograms) {
+      if (!this.currentScopeVarTypes.has(prog)) {
+        this.currentScopeVarTypes.set(prog, prog);
+      }
+    }
+  }
+
+  /**
+   * The PROGRAMs that some POU body calls or reads a member of, by name. A name declared
+   * as a variable in that POU is the variable, not the program. Refuses the two cases one
+   * shared instance cannot honour:
+   *   - a PROGRAM that also runs on a task: CODESYS would share the task's instance, and
+   *     calling it from another task's body races the task;
+   *   - a PROGRAM with located variables: the runtime copies located I/O in and out per
+   *     TASK program (located_range), so a called one would never see its I/O.
+   */
+  private findCalledPrograms(ast: CompilationUnit): Set<string> {
+    const programs = new Map(
+      ast.programs.map((p) => [p.name.toUpperCase(), p]),
+    );
+    const found = findCalledProgramCallers(ast); // program -> first caller
+    if (found.size === 0) return new Set();
+
+    const onTask = new Map<string, string>();
+    for (const c of this.projectModel?.configurations ?? []) {
+      for (const inst of this.collectProgramInstances(c)) {
+        onTask.set(
+          inst.programType.toUpperCase(),
+          inst.taskName ?? inst.instanceName,
+        );
+      }
+    }
+    for (const [prog, caller] of found) {
+      if (onTask.has(prog)) {
+        throw new Error(
+          `PROGRAM ${programs.get(prog)!.name} runs on task ${onTask.get(prog)} and is also ` +
+            `called from ${caller}. A called PROGRAM has one instance, shared with nothing; ` +
+            `take it off the task, or call a FUNCTION_BLOCK instance instead.`,
+        );
+      }
+      const located = programs
+        .get(prog)!
+        .varBlocks.flatMap((b) => b.declarations)
+        .find((d) => d.address);
+      if (located) {
+        throw new Error(
+          `PROGRAM ${programs.get(prog)!.name} is called from ${caller} and declares a located ` +
+            `variable (${located.names[0]} AT ${located.address}). The runtime copies located ` +
+            `I/O per task program, so a called PROGRAM would never see it: declare it in a ` +
+            `VAR_GLOBAL and use VAR_EXTERNAL.`,
+        );
+      }
+    }
+    return new Set(found.keys());
+  }
+
+  /**
+   * One file-scope instance per called PROGRAM, after the program classes, named after the
+   * program (see calledPrograms). Inline, like the VAR_GLOBAL storage above it, and with the
+   * same pointers to its VAR_EXTERNALs the configuration hands a task program.
+   */
+  private emitCalledProgramInstances(): void {
+    if (this.calledPrograms.size === 0) return;
+    this.emitHeader(
+      "// Called PROGRAMs: one instance each, the POU itself (CODESYS: a PROGRAM may call a PROGRAM).",
+    );
+    for (const upper of this.calledPrograms) {
+      const prog = this.projectModel?.programs.get(upper);
+      const name = prog ? prog.name : upper;
+      const args =
+        prog && prog.varExternal.length > 0
+          ? prog.varExternal.map((ext) => `&${ext.name}`).join(", ")
+          : "";
+      this.emitHeader(`inline Program_${name} ${name}{${args}};`);
+    }
+    this.emitHeader("");
   }
 
   /**
@@ -5517,7 +5610,15 @@ export class CodeGenerator {
       enExpr,
       enoVar,
       (bi) => {
-        this.emitPOUCallLine(instanceName, call.functionName, bi);
+        // A PROGRAM instance runs through run(); it has no operator().
+        if (
+          fbTypeName &&
+          this.knownProgramTypes.has(fbTypeName.toUpperCase())
+        ) {
+          this.emit(`${bi}${instanceName}.run();`);
+        } else {
+          this.emitPOUCallLine(instanceName, call.functionName, bi);
+        }
       },
       `${instanceName}.ENO`,
     );
